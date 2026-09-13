@@ -4,8 +4,9 @@ patch_driver.py - turn Dell/Canonical's proprietary ControlVault3 fingerprint
 driver (libfprint-2-tod-1-broadcom.so) into one that drives the older
 ControlVault2 (Broadcom BCM5880, USB 0a5c:5834) sensor.
 
-It applies 5 byte-level patches by unique signature search (offset-independent),
-so it keeps working even if the upstream binary shifts slightly.
+It applies 7 byte-level patches by unique signature search. Patches 6 and 7 use
+RIP-relative addresses calculated for the tested upstream binary, so use the
+pinned input fetched and checksum-verified by build_from_upstream.sh.
 
 Usage:
     python3 patch_driver.py <input.so> <output.so>
@@ -43,6 +44,24 @@ PATCHES = [
      "CV2's non-zero verify status no longer becomes verify-unknown-error",
      bytes.fromhex("85d2 0f858a000000 83f801".replace(" ", "")),
      bytes.fromhex("85d2 909090909090 83f801".replace(" ", ""))),
+
+    ("6. commit: pass Dell CV2's two identity blobs instead of empty identity "
+     "arguments (the replaced instructions include a one-use debug log call)",
+     bytes.fromhex(
+         "bf01000000 488d3563a60000 e80e02feff 4883ec08 418b7d00 "
+         "4531c9 53 4531c0 31c9 31d2 6a00 4889ee 488d44241c 50"
+         .replace(" ", "")),
+     bytes.fromhex(
+         "4883ec08 418b7d00 4c8d0d68a60000 53 41b815000000 "
+         "488d0d52a60000 ba08000000 6a00 4889ee 488d44241c 50 9090"
+         .replace(" ", ""))),
+
+    ("7. commit: store Dell CV2 identity blobs in the removed debug string",
+     b"call cv_fingerprint_commit_enrollment\n"[:29],
+     bytes.fromhex(
+         "0000040004000000 "
+         "0101ff0000000d000c42726f6164636f6d57424600"
+         .replace(" ", ""))),
 ]
 
 

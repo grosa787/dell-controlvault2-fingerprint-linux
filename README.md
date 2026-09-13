@@ -4,9 +4,9 @@ Make the **Dell ControlVault 2 / Broadcom BCM5880 "USH"** fingerprint reader
 (USB ID **`0a5c:5834`**) work under Linux with `fprintd` / `libfprint`.
 
 This reader is found on many **Dell Latitude** laptops (7390, 7480, **7490**,
-E7470, 5290, 5490, 5590, …). It has been considered *unsupported on Linux for
-about a decade* — `libfprint` does not recognise it, and Dell only ships a closed
-driver for the newer ControlVault **3** sensors.
+E7270, E7470, 5290, 5490, 5590, …). It has been considered *unsupported on Linux
+for about a decade* — `libfprint` does not recognise it, and Dell only ships a
+closed driver for the newer ControlVault **3** sensors.
 
 This repo patches that closed driver so it also drives the older CV2 chip.
 
@@ -22,15 +22,18 @@ Run `lsusb`. If you see:
 Bus 00x Device 00x: ID 0a5c:5834 Broadcom Corp. 5880
 ```
 
-…and `fprintd-enroll` says *"No devices available"*, this is for you.
+…and `fprintd-enroll` says *"No devices available"*, this project may support
+your reader. The complete flow is currently confirmed on one Latitude E7270;
+other `0a5c:5834` systems still need testing and may expose additional CV2
+firmware differences.
 
 ---
 
 ## Install
 
 This repo ships **only the patches**, not Dell's proprietary binary. The patched
-driver is built locally from Canonical's stock OEM driver. You need `git` and
-`python3`.
+driver is built locally from a pinned, checksum-verified revision of Canonical's
+stock OEM driver. You need `git`, `python3`, and `sha256sum`.
 
 ```bash
 git clone https://github.com/grosa787/dell-controlvault2-fingerprint-linux
@@ -39,7 +42,7 @@ cd dell-controlvault2-fingerprint-linux
 sudo ./install.sh            # install driver + udev rule + firmware, restart fprintd
 fprintd-enroll               # enroll a finger (press, lift, repeat ~4-8x)
 fprintd-verify               # test recognition
-sudo pam-auth-update         # (optional) enable fingerprint login & sudo
+sudo pam-auth-update         # optional, Debian/Ubuntu PAM integration
 ```
 
 If an OS / `libfprint` update ever wipes it, run `./install.sh` again (re-run
@@ -54,15 +57,15 @@ If an OS / `libfprint` update ever wipes it, run `./install.sh` again (re-run
 | Device detected by `libfprint`/`fprintd` | ✅ works |
 | Open / power-on | ✅ works |
 | Fingerprint **capture** (sensor lights, grabs images) | ✅ works |
-| **Enroll** → `enroll-completed` (template committed on-chip) | ✅ works |
-| **Verify / match** (match-on-chip) | ✅ implemented (patches 4–5) — **please confirm on your unit** |
+| **Enroll** → `enroll-completed` with a nonzero template handle | ✅ verified on E7270 |
+| **Verify / match** (match-on-chip) | ✅ verified on E7270 |
 
 The hard part is **match-on-chip**: the template lives in the chip's secure
-storage. Patches **4–5** route CV2's enrollment/verify status codes so the
-template actually commits and the match result is reported. This is the newest
-piece — if `fprintd-verify` gives `no-match`/`unknown-error` on your laptop,
-please open an issue with a debug log (below); CV2 units may use slightly
-different status codes that are trivial to add.
+storage. Patches **4–7** route CV2's enrollment/verify flow and provide the two
+identity blobs used by Dell's own CV2 Windows driver. A successful commit must
+return a nonzero template handle; treating status `0x8d` or `0x24` as success
+creates an unusable handle-zero host record. If `fprintd-verify` gives
+`no-match`/`unknown-error`, please open an issue with a debug log (below).
 
 > Tip while enrolling: **lift your finger completely between presses** and shift
 > its position a little each time. Failed grabs are ignored and harmless.
@@ -79,6 +82,9 @@ printf '[Service]\nEnvironment=G_MESSAGES_DEBUG=all\nEnvironment=LIBFPRINT_DEBUG
 sudo systemctl daemon-reload && sudo systemctl restart fprintd
 # reproduce, then:
 sudo journalctl -u fprintd --since "2 min ago" -o cat
+# disable debug logging afterwards:
+sudo rm /etc/systemd/system/fprintd.service.d/debug.conf
+sudo systemctl daemon-reload && sudo systemctl restart fprintd
 ```
 
 - `Device status = (NN)` (decimal) during enroll, or `identify failed 0xNN`
@@ -88,17 +94,19 @@ sudo journalctl -u fprintd --since "2 min ago" -o cat
 ---
 
 ## How it works
-Five byte-level patches turn the CV3 driver into a CV2 driver. Full
+Seven byte-level patches turn the CV3 driver into a CV2 driver. Full
 reverse-engineering write-up and the exact signatures are in
 **[PATCHES.md](PATCHES.md)**. The patcher (`patch_driver.py`) applies them by
-unique byte signature, so it survives minor upstream binary changes, and it
-reproduces the working driver **byte-for-byte**.
+unique byte signature. The build script pins the exact tested upstream revision
+because patches 6–7 contain binary-relative addresses. It reproduces the working
+driver **byte-for-byte** with SHA-256
+`308055122a9d4b7b723325a4935f25a23300ac656962c9db7e5285164233c5ab`.
 
 ## Repo layout
 ```
 install.sh              install the prebuilt driver + assets
 build_from_upstream.sh  fetch stock driver from Launchpad and patch it
-patch_driver.py         the 5 byte-patches (signature based)
+patch_driver.py         the 7 byte-patches (signature based)
 uninstall.sh            remove it
 prebuilt/               generated by build_from_upstream.sh (gitignored, proprietary)
 firmware/               generated by build_from_upstream.sh (gitignored, proprietary)
@@ -107,14 +115,26 @@ PATCHES.md              reverse-engineering notes
 ```
 
 ## Legal / license
-The driver and firmware are **proprietary Dell/Canonical/Broadcom** artifacts,
-redistributed here only as a convenience for owners of the hardware. There is no
-open license on those binaries. If you publish a fork, prefer shipping **only**
-the patcher + `build_from_upstream.sh` and letting users pull the stock binary
-from Canonical's OEM repo themselves. The patches, scripts and docs in this repo
-are released under the MIT license.
+The driver and firmware are **proprietary Dell/Canonical/Broadcom** artifacts and
+have no open redistribution license. This repository therefore ships only the
+patcher and build script; users fetch the stock artifacts from Canonical and
+patch them locally. The original patches, scripts and documentation in this
+repository are released under the MIT license.
 
 ## Credits
 Reverse-engineered from the shipped `.so` with `radare2` + `pyusb` on a Dell
 Latitude 7490. USB transport groundwork inspired by the NFC work in
 [`jacekkow/controlvault2-nfc-enable`](https://github.com/jacekkow/controlvault2-nfc-enable).
+
+The CV2 enrollment-commit identity fix was reverse-engineered and implemented by
+OpenAI Codex, then validated on a Dell Latitude E7270 through enrollment,
+verification, daemon restart, and full system reboot.
+
+## Reporting results
+
+Reports from other `0a5c:5834` systems are welcome. Please include the laptop
+model, `lsusb` device line, distribution, `fprintd --version`, whether enrollment
+returned a nonzero handle, and whether verification still works after reboot.
+For failures, attach the relevant `fprintd` journal output after removing user
+names or other personal data. Never include passwords or enrolled fingerprint
+storage files.

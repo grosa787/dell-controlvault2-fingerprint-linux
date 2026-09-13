@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 <your name>
+Copyright (c) 2026 dell-controlvault2-fingerprint-linux contributors
 
 This license applies ONLY to the original content of this repository:
 the scripts (patch_driver.py, *.sh), the udev rule, and the documentation
