@@ -21,22 +21,27 @@ hard-wired to CV3.
 - The 44-byte CV header (from `cvhEncapsulateCmd`):
   `+0x00 u32=1 | +0x04 u32 total_len | +0x08 u16 command_id | +0x0a u16 flags |
    +0x0c u32 lib_ver | +0x28 u32 num_params | +0x2c params…`
-- The CV2 chip answers correctly (`cv_get_ush_ver` returns status `0x0`), proving
-  the protocol is shared between CV2 and CV3 — only the high-level driver gates
-  differ.
+- The CV2 chip answers correctly (`cv_get_ush_ver` returns status `0x0`), showing
+  compatibility for this command. Other commands require the CV2 arguments below.
 
-## The 5 patches (applied by `patch_driver.py` via unique byte signatures)
+## The 9 patches (applied by `patch_driver.py` via unique byte signatures)
 
 | # | Site | Change | Why |
 |---|------|--------|-----|
 | 1 | `.rodata` id_table | USB PID `0x5842` → `0x5834` | so libfprint binds **our** device to this driver |
 | 2 | device enumerator | PID-filter `je` → `jmp` (`74`→`eb`) | so the driver's libusb path also accepts `0x5834` |
 | 3 | `dev_probe` | firmware-check err `0x1c` handled as success (`je` disp `1f`→`3a`) | the CV3 driver can't match our BCM5880 to a "Citadel" chip type and aborts; CV2 already runs resident firmware, so **nothing is flashed** — we just skip the bogus upgrade check |
-| 4 | enroll state machine | CV2 status `0x59` routed to the normal status-`0` path | `0x59` is CV2's "enrollment data ready"; the stock driver treats it as a fatal `Device status = (89)`. Routing it correctly lets the **COMMIT** phase run so the template is actually stored in the chip |
-| 5 | verify completion | drop the `edx!=0` short-circuit (6× `nop`) | CV2 returns a non-zero verify status the CV3 code doesn't know, so it completed without calling `verify_report` → `verify-unknown-error`. Now `verify_report` is always called and the match result is honored |
+| 4 | update wrapper, `0x2b164` | map `0x59` to the existing `0x89` sample-retry path, replacing only an error log | `0x59` is `CV_FP_MATCH_GENERAL_ERROR`, not data-ready; never commit the missing output token. Original `0xa4` rollback handling remains intact |
+| 5 | verify completion, `0xd510` | keep the command-status check; report `0x89` as a scan retry and other nonzero statuses as no match | stock error handling completed without `verify_report`; now report a retry error (`FPI_MATCH_ERROR`) or no match before `verify_complete(NULL)`. Match data is used only when command status is 0 |
+| 6 | commit wrapper, `0x2b251` | provide object attributes (8 bytes) and authorization (21 bytes) instead of zero arguments | CV2 rejects the empty attributes/authorization parameters in command `0x6e` |
+| 7 | removed debug string, `0x358c0` | store the 29 bytes of attributes and authorization | read-only storage for patch 6 without extending ELF segments |
+| 8 | delete wrapper, `0x2b3c3` | supply 21-byte authorization list from commit | empty auth produced `CV_AUTH_FAIL` (8); authenticated deletion now returns success |
+| 9 | identify callback, `0xd39e` | report `0x89` as a scan retry, replacing status dispatch and a diagnostic log | use `identify_report(NULL, NULL, retry)` then `identify_complete(NULL)`; retain successful matches, no match for other errors, and session cleanup |
 
 Patches 1–3 get the device **recognized, opened and capturing**.
-Patches 4–5 are about actually **storing and matching** a template (match-on-chip).
+Patches 4–5 handle failed samples without treating them as success.
+Patches 6–7 supply commit arguments; patch 8 supplies deletion authorization.
+Patch 9 adds invalid-image retries to identify, complementing verify patch 5.
 
 ## Tools used
 `radare2`, `objdump`, `nm`, `readelf`, `pyusb`. No source — everything was
@@ -44,8 +49,77 @@ recovered by disassembly of the shipped `.so` and live USB probing on a real
 Latitude 7490.
 
 ## Status / caveats
-- `0x59` / `0x89` are CV2 status codes recovered empirically. If your unit
-  reports different codes during enroll/verify, capture `journalctl -u fprintd`
-  with debug logging (see README) and the dispatch can be extended.
+- `0x59` is `CV_FP_MATCH_GENERAL_ERROR`; `0x89` is `CV_NO_VALID_FP_IMAGE`.
+  Neither indicates successful enrollment or a valid match. See the SDK
+  definitions below; unknown errors must not be converted to success.
+- On the tested Latitude 7490, enrollment and authenticated deletion succeeded,
+  with consistent fingerprint verification and successful login after a full
+  reboot. See [tests](tests/README.md) for regression checks.
+- The identify retry patch is covered by native callback tests; validation with
+  multiple enrolled fingers through `fprintd` is still pending. Retry errors are
+  reported before completion as required by the
+  [libfprint API](https://fprint.freedesktop.org/libfprint-dev/libfprint-2-Internal-FpDevice.html#fpi-device-identify-report).
 - This is an **unofficial** patch of a **proprietary** binary. It is not endorsed
   by Dell, Broadcom or Canonical. Use on hardware you own.
+
+## Pinned binary and addressing
+
+Canonical OEM revision: `f7d31fcb9f6952d7d76ba50287e000c29760589d`.
+
+- Stock SHA-256: `54fa3befc02df393077cebf96e018e3bf752cee61509897d945ab18c58c5e172`
+- Patched SHA-256: `62868df275e49a7a345ebd9245d651e141a750fee1bfa6d9a8b1b627b1678278`
+
+The patcher checks both hashes and unique, equal-length signatures. Input pinning
+is essential: the patches contain relative branches and RIP-relative addresses,
+which cannot safely be validated by matching the replaced instructions alone.
+The file size and ELF segment layout are unchanged.
+
+## Commit and deletion arguments
+
+The commit fix is adapted from
+[aegan977's PR #8](https://github.com/grosa787/dell-controlvault2-fingerprint-linux/pull/8).
+The data at `0x358c0` contains 8 bytes of object attributes
+(`0000040004000000`) followed at `0x358c8` by a 21-byte authorization list
+(`0101ff0000000d000c42726f6164636f6d57424600`). This is a
+`CV_AUTH_PASSPHRASE` list containing Dell's fixed `BroadcomWBF` value, not a user
+identity or a fingerprint template.
+
+The commit wrapper points to both fields. The delete wrapper passes the same
+authorization pointer/length while preserving its session and object arguments,
+null callbacks, and downstream return status. Empty deletion authorization
+produced `CV_AUTH_FAIL` (8) on the tested device. The vendor completion callback
+maps failures misleadingly to “print not found”; patch 8 supplies the missing
+authorization without changing that callback's error mapping.
+
+## Reverse-engineering sources
+
+Canonical's older 5.12.018 library at revision
+`7ee01c0cb5d04432f978f21b843428bfb04f00c4` includes DWARF enumerations read with
+`readelf --debug-dump=info`:
+
+| Hex | Name |
+|---|---|
+| 0x08 | CV_AUTH_FAIL |
+| 0x24 | CV_OBJECT_ATTRIBUTES_INVALID |
+| 0x59 | CV_FP_MATCH_GENERAL_ERROR |
+| 0x89 | CV_NO_VALID_FP_IMAGE |
+| 0x8d | CV_NO_VALID_FP_TEMPLATE |
+| 0x8f | CV_MORE_DATA |
+| 0xa4 | CV_FP_SENSOR_ROLLBACK_REQUIRED |
+
+That library's SHA-256 is
+`bfb5e72fc04b4e07189a04da5cdd51cb4b69405bd1ebf7ba92031db066d7bd4a`.
+These are host SDK definitions consistent with the observed paths, not proof
+that every CV2 firmware version behaves identically.
+
+Dell's [ControlVault2 Windows package 4.10.12.13 A19](https://www.dell.com/support/home/en-us/drivers/driversdetails?driverid=ckgx6)
+provides independent reference arguments. The downloaded executable's SHA-256 is
+`aa5583a4c5d0ca459ee6653bcbcd2108df5d5c39986dddfcadcfa0eb824946ba`.
+Disassembly of its x64 WBF libraries showed:
+
+- `BrcmStorageAdapter.dll`: authorization construction at `0x180006be0`,
+  `CSS_SetupAuthSession` at `0x180006c84` and `CSS_DeleteObject` at `0x180006cc0`.
+- `bipdll.dll`: `CSS_DeleteObject` forwards authorization to `cv_delete` at
+  `0x180011584`.
+
+The Windows binaries were inspected, not installed or used to flash the device.
