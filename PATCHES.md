@@ -43,9 +43,26 @@ Patches 4–5 are about actually **storing and matching** a template (match-on-c
 recovered by disassembly of the shipped `.so` and live USB probing on a real
 Latitude 7490.
 
+## Known CV2 status codes / open problems
+
+Collected from user reports in the issue tracker. None of these is fixed by
+patches 1–5; each needs more than swapping a constant. Codes printed by the
+driver with `%x` (e.g. `cv_fingerprint_identify failed 89`) are **hex**;
+`Device status = (NN)` from fprintd is **decimal**.
+
+| Code | Seen in | What is known | Issues |
+|---|---|---|---|
+| `0x24` (36) | `cv_fingerprint_commit_enrollment` | The commit function's success gate accepts only `0` and `0x34`; `0x24` takes the error path before the template handle is saved. Changing the gate to `0x24` makes the commit report success, but the handle is still `0` and verify never matches (#3). Not applied here for that reason. | #1, #2, #3, #5, #7, #9 |
+| `0x8d` (141) | commit | Follows a 4th capture that ended in `Update enrollment failed : cancel capture`; may mean "commit on a cancelled session". Intermittent on some units (#12). | #2, #9, #12 |
+| `0x59` (89) | enroll update | Patch 4 routes it to the status-0 path, which starts the commit. A Windows A21 trace on a `0a5c:5833` unit shows no `0x59` in a successful enrollment (4 updates + 2 commits, all `0x00`), so treating it as "data ready" is an empirical workaround and may commit after only 3 samples. Patch 4 also replaces the stock `0xa4` retry check. | #4, #5 |
+| `0x89` (137) | enroll update | Real "bad capture / retry" status. The stock driver re-captures without re-arming; the Windows stack sends command `0x8a` (enrollment started) before each new capture. Recovery needs an extra CV command, not a branch patch. Do **not** redirect the `0x89` branch (tried in #4 and #5, breaks enrollment). | #4, #5 |
+| `0x17` | `cv_do_fingerprint_identify` | Constant for enrolled and unenrolled fingers; likely a pre-comparison failure. Separately, `cvif_fingerprint_identify` returns a zero-initialised local instead of the parsed result. | #5 |
+| `0x1b`, `0x47` | identify | Seen instead of the CV3 "match" code `0x89`. | #2, #3 |
+| `0x100002` | `cv_get_ush_ver()`, `cv_open()` | Chip never answers; session never opens. Seen on a unit with a factory-default USB serial that was possibly never provisioned. | #6 |
+
+If your unit reports a different code, run `./diagnose.sh` with debug logging
+enabled (see README) and attach the output to an issue.
+
 ## Status / caveats
-- `0x59` / `0x89` are CV2 status codes recovered empirically. If your unit
-  reports different codes during enroll/verify, capture `journalctl -u fprintd`
-  with debug logging (see README) and the dispatch can be extended.
 - This is an **unofficial** patch of a **proprietary** binary. It is not endorsed
   by Dell, Broadcom or Canonical. Use on hardware you own.
