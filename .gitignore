@@ -7,3 +7,4 @@ firmware/bcm_cv_current_version.txt
 # scratch
 test_*.so
 *.tmp
+__pycache__/

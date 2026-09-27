@@ -4,8 +4,14 @@
 # binary in this repo (and is the recommended path for a clean GitHub fork).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-WORK="$(mktemp -d)"
 UPSTREAM="https://git.launchpad.net/~oem-solutions-engineers/libfprint-2-tod1-broadcom/+git/libfprint-2-tod1-broadcom"
+
+for tool in git python3; do
+  command -v "$tool" >/dev/null || { echo "Missing required tool: $tool" >&2; exit 1; }
+done
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
 
 echo "[*] Cloning upstream (branch: upstream) ..."
 git clone --depth 1 -b upstream "$UPSTREAM" "$WORK/up"
@@ -19,7 +25,10 @@ python3 "$HERE/patch_driver.py" "$STOCK" "$HERE/prebuilt/libfprint-2-tod-1-broad
 
 echo "[*] Copying firmware blobs from upstream ..."
 mkdir -p "$HERE/firmware"
-cp -n "$WORK"/up/var/lib/fprint/fw/* "$HERE/firmware/" 2>/dev/null || true
+if compgen -G "$WORK/up/var/lib/fprint/fw/*" >/dev/null; then
+  cp -f "$WORK"/up/var/lib/fprint/fw/* "$HERE/firmware/"
+else
+  echo "[!] No firmware blobs found in upstream tree (var/lib/fprint/fw)" >&2
+fi
 
-rm -rf "$WORK"
 echo "[*] Done. Now run:  ./install.sh"
