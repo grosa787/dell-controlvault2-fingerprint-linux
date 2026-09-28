@@ -5,12 +5,14 @@ driver (libfprint-2-tod-1-broadcom.so) into one that drives the older
 ControlVault2 (Broadcom BCM5880, USB 0a5c:5834) sensor.
 
 Applies nine patches to the pinned Canonical binary. The commit arguments fix
-uses RIP-relative addresses, so other inputs are rejected by SHA-256.
+uses RIP-relative addresses, so only the pinned stock binary and the exact
+patched output are accepted by SHA-256.
 Commit attributes and authorization adapted from PR #8 by aegan977:
 https://github.com/grosa787/dell-controlvault2-fingerprint-linux/pull/8
 
 Usage:
-    python3 patch_driver.py <input.so> <output.so>
+    python3 patch_driver.py <input.so> <output.so>   apply the patches (idempotent)
+    python3 patch_driver.py --check <driver.so>      report which patches are applied
 
 Where <input.so> is the STOCK driver from Canonical's OEM repository at revision
 f7d31fcb9f6952d7d76ba50287e000c29760589d. Use build_from_upstream.sh to fetch that
@@ -91,31 +93,77 @@ def write_atomic(path, data):
             os.unlink(temporary)
 
 
+def sha256(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def patch_state(data, find, repl):
+    """'stock', 'patched', or 'missing' (signature absent or ambiguous)."""
+    n_find, n_repl = data.count(find), data.count(repl)
+    if n_find == 1 and n_repl == 0:
+        return "stock"
+    if n_find == 0 and n_repl == 1:
+        return "patched"
+    return "missing"
+
+
+def check(path):
+    with open(path, "rb") as f:
+        data = f.read()
+    print("file:   " + path)
+    print("sha256: " + sha256(data))
+    states = [patch_state(data, find, repl) for _, find, repl in PATCHES]
+    for (desc, _, _), state in zip(PATCHES, states):
+        print("[%-7s] %s" % (state, desc.split(":")[0]))
+    if all(s == "patched" for s in states):
+        if sha256(data) != PATCHED_SHA256:
+            print("\nPatched driver SHA-256 mismatch; rebuild with ./build_from_upstream.sh")
+            return 1
+        print("\nAll %d CV2 patches are applied." % len(PATCHES))
+        return 0
+    if all(s == "stock" for s in states):
+        print("\nThis is the STOCK driver (no CV2 patches).")
+        return 1
+    print("\nPartially patched or unknown driver build.")
+    return 1
+
+
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == "--check":
+        sys.exit(check(sys.argv[2]))
     if len(sys.argv) != 3:
         print(__doc__)
         sys.exit(2)
     with open(sys.argv[1], "rb") as f:
         data = bytearray(f.read())
+    print("input sha256:  " + sha256(data))
 
-    if hashlib.sha256(data).hexdigest() != STOCK_SHA256:
-        sys.exit("FAILED: stock driver SHA-256 mismatch; use build_from_upstream.sh")
+    # Relative addresses in the new patches require the tested binary layout.
+    # Accept our exact output too, preserving idempotent re-patching.
+    if sha256(data) not in (STOCK_SHA256, PATCHED_SHA256):
+        sys.exit("FAILED: driver SHA-256 mismatch; use build_from_upstream.sh")
 
     for desc, find, repl in PATCHES:
         assert len(find) == len(repl), "patch length mismatch: " + desc
-        n = data.count(find)
-        if n == 0:
+        state = patch_state(data, find, repl)
+        if state == "patched":
+            print("[already] " + desc)
+            continue
+        if state == "missing":
+            n = data.count(find)
+            if n > 1:
+                sys.exit("FAILED: signature ambiguous (%d hits) for patch:\n  %s" % (n, desc))
             sys.exit("FAILED: signature not found for patch:\n  " + desc +
                      "\n  (is this the right libfprint-2-tod-1-broadcom.so?)")
-        if n > 1:
-            sys.exit(f"FAILED: signature ambiguous ({n} hits) for patch:\n  {desc}")
-        data[data.index(find):data.index(find) + len(find)] = repl
+        off = data.index(find)
+        data[off:off + len(find)] = repl
         print("[ok] " + desc)
 
-    if hashlib.sha256(data).hexdigest() != PATCHED_SHA256:
+    if sha256(data) != PATCHED_SHA256:
         sys.exit("FAILED: patched driver SHA-256 mismatch; output was not written")
 
     write_atomic(sys.argv[2], data)
+    print("output sha256: " + sha256(data))
     print("\nPatched driver written to: " + sys.argv[2])
 
 

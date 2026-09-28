@@ -48,6 +48,27 @@ Patch 9 adds invalid-image retries to identify, complementing verify patch 5.
 recovered by disassembly of the shipped `.so` and live USB probing on a real
 Latitude 7490.
 
+## Known CV2 status codes / open problems
+
+Collected from reports against the earlier patches 1–5. The updated patches
+address commit arguments and retry reporting on the tested Latitude 7490; the
+other reported units still need validation. Codes printed by the
+driver with `%x` (e.g. `cv_fingerprint_identify failed 89`) are **hex**;
+`Device status = (NN)` from fprintd is **decimal**.
+
+| Code | Seen in | What is known | Issues |
+|---|---|---|---|
+| `0x24` (36) | `cv_fingerprint_commit_enrollment` | The commit function's success gate accepts only `0` and `0x34`; `0x24` takes the error path before the template handle is saved. Changing the gate to `0x24` makes the commit report success, but the handle is still `0` and verify never matches (#3). Not applied here for that reason. Patches 6–7 instead supply the missing object attributes and authorization; the original success gate remains intact. | #1, #2, #3, #5, #7, #9 |
+| `0x8d` (141) | commit | The host SDK names this `CV_NO_VALID_FP_TEMPLATE`. Reports follow a 4th capture that ended in `Update enrollment failed : cancel capture`; intermittent on some units (#12). Resolution on those units is unconfirmed. | #2, #9, #12 |
+| `0x59` (89) | enroll update | The earlier patch 4 routed it to the status-0 path, which started the commit. A Windows A21 trace on a `0a5c:5833` unit shows no `0x59` in a successful enrollment (4 updates + 2 commits, all `0x00`), so treating it as "data ready" is an empirical workaround and may commit after only 3 samples. That patch also replaced the stock `0xa4` rollback check. Updated patch 4 uses the SDK definition `CV_FP_MATCH_GENERAL_ERROR` to request another sample and preserves the original rollback handling. | #4, #5 |
+| `0x89` (137) | enroll update | Real "bad capture / retry" status. The stock driver re-captures without re-arming; the Windows stack sends command `0x8a` (enrollment started) before each new capture. Recovery needs an extra CV command, not a branch patch. The updated patches leave that enrollment branch intact. Patches 5 and 9 report retries for `0x89` in verify/identify callbacks; they do not implement enrollment re-arming. | #4, #5 |
+| `0x17` | `cv_do_fingerprint_identify` | Constant for enrolled and unenrolled fingers; likely a pre-comparison failure. Separately, `cvif_fingerprint_identify` returns a zero-initialised local instead of the parsed result. | #5 |
+| `0x1b`, `0x47` | identify | Reported during identify. The host SDK defines `0x89` as an invalid image, not a match. Updated patches keep nonzero command statuses out of the successful-match path; these units still need investigation. | #2, #3 |
+| `0x100002` | `cv_get_ush_ver()`, `cv_open()` | Chip never answers; session never opens. Seen on a unit with a factory-default USB serial that was possibly never provisioned. | #6 |
+
+If your unit reports a different code, run `./diagnose.sh` with debug logging
+enabled (see README) and attach the output to an issue.
+
 ## Status / caveats
 - `0x59` is `CV_FP_MATCH_GENERAL_ERROR`; `0x89` is `CV_NO_VALID_FP_IMAGE`.
   Neither indicates successful enrollment or a valid match. See the SDK
@@ -69,7 +90,11 @@ Canonical OEM revision: `f7d31fcb9f6952d7d76ba50287e000c29760589d`.
 - Stock SHA-256: `54fa3befc02df393077cebf96e018e3bf752cee61509897d945ab18c58c5e172`
 - Patched SHA-256: `62868df275e49a7a345ebd9245d651e141a750fee1bfa6d9a8b1b627b1678278`
 
-The patcher checks both hashes and unique, equal-length signatures. Input pinning
+The patcher checks both hashes and unique, equal-length signatures. Re-applying
+to the exact patched output succeeds without changing its bytes. `--check` keeps
+the per-patch status report and requires the expected output hash before reporting
+a complete build. Older five-patch or partially patched libraries must be rebuilt
+from stock with `build_from_upstream.sh`. Input pinning
 is essential: the patches contain relative branches and RIP-relative addresses,
 which cannot safely be validated by matching the replaced instructions alone.
 The file size and ELF segment layout are unchanged.

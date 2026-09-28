@@ -4,10 +4,16 @@
 # binary in this repo (and is the recommended path for a clean GitHub fork).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
+UPSTREAM="https://git.launchpad.net/~oem-solutions-engineers/libfprint-2-tod1-broadcom/+git/libfprint-2-tod1-broadcom"
+# The CV2 commit/authorization patches use relative addresses in this build.
+UPSTREAM_COMMIT="f7d31fcb9f6952d7d76ba50287e000c29760589d"
+
+for tool in git python3; do
+  command -v "$tool" >/dev/null || { echo "Missing required tool: $tool" >&2; exit 1; }
+done
+
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
-UPSTREAM="https://git.launchpad.net/~oem-solutions-engineers/libfprint-2-tod1-broadcom/+git/libfprint-2-tod1-broadcom"
-UPSTREAM_COMMIT="f7d31fcb9f6952d7d76ba50287e000c29760589d"
 
 echo "[*] Fetching tested upstream revision $UPSTREAM_COMMIT ..."
 git init -q "$WORK/up"
@@ -18,12 +24,16 @@ git -C "$WORK/up" checkout -q --detach FETCH_HEAD
 STOCK="$WORK/up/usr/lib/x86_64-linux-gnu/libfprint-2/tod-1/libfprint-2-tod-1-broadcom.so"
 [[ -f "$STOCK" ]] || { echo "stock .so not found in upstream tree" >&2; exit 1; }
 
-echo "[*] Verifying stock and patched SHA-256 and applying CV2 patches ..."
+echo "[*] Applying CV2 patches ..."
 mkdir -p "$HERE/prebuilt"
 python3 "$HERE/patch_driver.py" "$STOCK" "$HERE/prebuilt/libfprint-2-tod-1-broadcom.PATCHED.so"
 
 echo "[*] Copying firmware blobs from upstream ..."
 mkdir -p "$HERE/firmware"
-cp -- "$WORK"/up/var/lib/fprint/fw/* "$HERE/firmware/"
+if compgen -G "$WORK/up/var/lib/fprint/fw/*" >/dev/null; then
+  cp -f "$WORK"/up/var/lib/fprint/fw/* "$HERE/firmware/"
+else
+  echo "[!] No firmware blobs found in upstream tree (var/lib/fprint/fw)" >&2
+fi
 
 echo "[*] Done. Now run:  ./install.sh"

@@ -23,6 +23,75 @@ class PatchTests(unittest.TestCase):
             capture_output=True, text=True,
         )
 
+    def run_check(self, source):
+        return subprocess.run(
+            [sys.executable, str(ROOT / "patch_driver.py"), "--check", str(source)],
+            capture_output=True, text=True,
+        )
+
+    @unittest.skipUnless(STOCK, "set CV2_STOCK_DRIVER to the pinned stock library")
+    def test_check_reports_stock_and_all_nine_patches(self):
+        result = self.run_check(STOCK)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("STOCK driver", result.stdout)
+        self.assertEqual(result.stdout.count("[stock  ]"), 9)
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "out.so"
+            result = self.run_patch(STOCK, output)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result = self.run_check(output)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("All 9 CV2 patches are applied.", result.stdout)
+            self.assertIn(EXPECTED, result.stdout)
+
+    @unittest.skipUnless(STOCK, "set CV2_STOCK_DRIVER to the pinned stock library")
+    def test_repatch_is_idempotent_including_in_place(self):
+        with tempfile.TemporaryDirectory() as directory:
+            first, second = Path(directory) / "first.so", Path(directory) / "second.so"
+            result = self.run_patch(STOCK, first)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for source, destination in ((first, second), (second, second)):
+                result = self.run_patch(source, destination)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(hashlib.sha256(destination.read_bytes()).hexdigest(), EXPECTED)
+                self.assertIn("[already]", result.stdout)
+                self.assertIn("input sha256:", result.stdout)
+                self.assertIn("output sha256:", result.stdout)
+
+    @unittest.skipUnless(STOCK, "set CV2_STOCK_DRIVER to the pinned stock library")
+    def test_check_and_repatch_reject_modified_patched_binary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source, output = Path(directory) / "in.so", Path(directory) / "out.so"
+            result = self.run_patch(STOCK, source)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            data = bytearray(source.read_bytes())
+            data[-1] ^= 1  # Keep all nine patch signatures intact.
+            source.write_bytes(data)
+            result = self.run_check(source)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn("SHA-256 mismatch", result.stdout)
+            output.write_bytes(b"keep previous build")
+            result = self.run_patch(source, output)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(output.read_bytes(), b"keep previous build")
+
+    @unittest.skipUnless(STOCK, "set CV2_STOCK_DRIVER to the pinned stock library")
+    def test_check_does_not_accept_legacy_five_patch_driver(self):
+        patches = runpy.run_path(str(ROOT / "patch_driver.py"))["PATCHES"]
+        data = Path(STOCK).read_bytes()
+        for _, find, replacement in patches[:3]:
+            data = data.replace(find, replacement)
+        data = data.replace(bytes.fromhex("4181fda40000000f84fd010000"),
+                            bytes.fromhex("4181fd590000000f8416000000"))
+        data = data.replace(bytes.fromhex("85d20f858a00000083f801"),
+                            bytes.fromhex("85d290909090909083f801"))
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "legacy.so"
+            source.write_bytes(data)
+            result = self.run_check(source)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn("Partially patched or unknown", result.stdout)
+
     def test_invalid_input_preserves_output(self):
         with tempfile.TemporaryDirectory() as directory:
             source, output = Path(directory) / "in.so", Path(directory) / "out.so"
@@ -95,6 +164,7 @@ class PatchTests(unittest.TestCase):
             root = Path(directory)
             for name in ("install.sh", "patch_driver.py"):
                 shutil.copyfile(ROOT / name, root / name)
+            shutil.copytree(ROOT / "lib", root / "lib")
             (root / "prebuilt").mkdir()
             (root / "prebuilt/libfprint-2-tod-1-broadcom.PATCHED.so").write_bytes(b"old driver")
             commands = root / "commands"
@@ -112,7 +182,7 @@ class PatchTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse(marker.exists(), "installer reached a system command before rejecting input")
-            self.assertIn("checksum mismatch", result.stderr)
+            self.assertIn("not a fully patched driver", result.stderr)
 
     @unittest.skipUnless(STOCK, "set CV2_STOCK_DRIVER to the pinned stock library")
     def test_enrollment_update_preserves_success_retry_and_error_statuses(self):

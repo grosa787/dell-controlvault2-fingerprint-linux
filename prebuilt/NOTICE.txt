@@ -2,10 +2,9 @@ libfprint-2-tod-1-broadcom.PATCHED.so is a PATCHED copy of Dell/Canonical's
 proprietary driver of the same name (obtained from Canonical's OEM repo:
 https://git.launchpad.net/~oem-solutions-engineers/libfprint-2-tod1-broadcom ).
 
-It is provided here only as a convenience for owners of the affected Dell
-hardware. It carries NO open-source license. If you fork this project publicly,
-prefer deleting this file and using ../build_from_upstream.sh instead, which
-fetches the stock binary and applies the patches locally.
+It carries NO open-source license and is NOT committed to this repository:
+../build_from_upstream.sh fetches the stock binary and generates it locally.
 
-The 5 byte-level modifications vs the stock binary are documented in ../PATCHES.md
+The 9 byte-level modifications vs the stock binary are documented in ../PATCHES.md
 and reproducible with ../patch_driver.py (verified byte-for-byte identical).
+Check an installed driver with:  python3 ../patch_driver.py --check <driver.so>

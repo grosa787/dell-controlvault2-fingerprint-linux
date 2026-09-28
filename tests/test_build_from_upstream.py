@@ -24,8 +24,10 @@ import sys
 args = sys.argv[1:]
 if args[0] == "init":
     Path(args[-1]).mkdir()
-elif args[2] == "fetch" and os.environ["BUILD_TEST_FAILURE"] == "fetch":
-    sys.exit(37)
+elif args[2] == "fetch":
+    assert args[-1] == "f7d31fcb9f6952d7d76ba50287e000c29760589d", args
+    if os.environ["BUILD_TEST_FAILURE"] == "fetch":
+        sys.exit(37)
 elif args[2] == "checkout":
     root = Path(args[1])
     stock = root / "usr/lib/x86_64-linux-gnu/libfprint-2/tod-1/libfprint-2-tod-1-broadcom.so"
@@ -67,15 +69,23 @@ Path(sys.argv[2]).write_bytes(b"patched fixture")
             self.assertEqual(list((root / "work").iterdir()), [])
 
     def test_failures_are_reported_and_workspace_is_cleaned(self):
-        for failure in ("fetch", "patch", "copy", "missing-firmware"):
+        for failure in ("fetch", "patch", "copy"):
             with self.subTest(stage=failure), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 result = self.run_build(root, failure)
                 self.assertNotEqual(result.returncode, 0, result.stdout)
                 self.assertNotIn("[*] Done.", result.stdout)
                 self.assertEqual(list((root / "work").iterdir()), [])
-                if failure in ("copy", "missing-firmware"):
+                if failure == "copy":
                     self.assertTrue(result.stderr, "copy errors must remain visible")
+
+    def test_missing_firmware_warns_and_cleans_workspace(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            result = self.run_build(root, "missing-firmware")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("No firmware blobs found", result.stderr)
+            self.assertEqual(list((root / "work").iterdir()), [])
 
 
 if __name__ == "__main__":

@@ -3,23 +3,23 @@
 Run the checks that do not require a vendor binary:
 
 ```bash
-python3 -m unittest discover -s tests -p test_patch_driver.py -v
+python3 -m unittest discover -s tests -v
 ```
 
-This runs five standalone checks and skips six binary integration
-tests. For all eleven tests, supply the stock library from the exact Canonical
-revision pinned in `build_from_upstream.sh`:
+Binary integration tests are skipped unless you supply the stock library from
+the exact Canonical revision pinned in `build_from_upstream.sh`:
 
 ```bash
 CV2_STOCK_DRIVER=/absolute/path/to/stock/libfprint-2-tod-1-broadcom.so \
-  python3 -m unittest discover -s tests -p test_patch_driver.py -v
+  python3 -m unittest discover -s tests -v
 ```
 
 Full tests require x86-64 Linux, Python 3, Bash, a C compiler (`cc`), and the
 vendor library's runtime dependencies (including TOD-enabled libfprint).
 The stock input must have SHA-256
 `54fa3befc02df393077cebf96e018e3bf752cee61509897d945ab18c58c5e172`.
-A patched or otherwise modified input is deliberately rejected. The upstream
+The integration tests require stock input. The patcher itself also accepts its
+exact patched output for idempotent re-patching; other modified inputs are rejected. The upstream
 library path is
 `usr/lib/x86_64-linux-gnu/libfprint-2/tod-1/libfprint-2-tod-1-broadcom.so`.
 
@@ -31,7 +31,9 @@ commit pointers and error branching, expected output checksum, unchanged output
 on invalid input, rejection of modified stock libraries, and rejection of stale
 libraries during packaging and direct installation. Atomic-write tests check
 replacement without modifying the previous inode, preservation of the existing
-output on write/replace failure, and temporary-file cleanup. The installer test intercepts
+output on write/replace failure, and temporary-file cleanup. Additional integration checks cover `--check` on stock and nine-patch builds,
+rejection of older five-patch and modified builds, and idempotent re-patching
+(including in place). The installer test uses the main branch's shared helpers and intercepts
 system commands and checks that invalid input is rejected before they run.
 
 The harness addresses and call conventions are specific to the pinned binary.
@@ -52,6 +54,7 @@ Build-script regression tests run without network access or a vendor binary:
 python3 -m unittest discover -s tests -p test_build_from_upstream.py -v
 ```
 
-These two tests cover firmware replacement and temporary-directory cleanup on
-success and on fetch, patch, copy, or missing-firmware failures. Git and the
+These tests cover the pinned fetch revision, firmware replacement, and
+temporary-directory cleanup on success and on fetch, patch, or copy failures.
+Missing firmware retains the main branch's warning behavior. Git and the
 patcher use local fixtures; filesystem operations use the actual shell commands.
