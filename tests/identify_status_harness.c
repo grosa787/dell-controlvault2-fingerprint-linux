@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
+/* Task result layout recovered from the pinned driver. */
 static struct { uint32_t status, match; void *print; } result;
 static int reports, completions, retries, closes, bad_call, retry_error;
 static int fake_print, fake_device;
@@ -47,6 +48,7 @@ int main(int argc, char **argv)
     if (!symbol || !dladdr(symbol, &info)) return 2;
     uint32_t *handle = dlsym(library, "cvhandle");
     if (!handle) return 2;
+    /* The callback is not exported; its offset is specific to the pinned ELF. */
     void (*callback)(void *, void *, void *) =
         (void *)((unsigned char *)info.dli_fbase + 0xd370);
     const uint32_t statuses[] = {0, 0x89, 0x24, 0x59};

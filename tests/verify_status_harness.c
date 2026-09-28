@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
+/* Task result layout recovered from the pinned driver. */
 static struct { uint32_t status, match; void *print; } result;
 static int reports, reported_match, completions, retry_error;
 static void *completion_error, *report_error;
@@ -31,6 +32,7 @@ int main(int argc, char **argv)
     uint32_t *handle = dlsym(library, "cvhandle");
     if (!handle) return 2;
     *handle = 0; /* No USB close call on callback completion. */
+    /* The callback is not exported; its offset is specific to the pinned ELF. */
     void (*callback)(void *, void *, void *) =
         (void *)((unsigned char *)info.dli_fbase + 0xd450);
     const uint32_t statuses[] = {0, 0, 0x89, 0x24};

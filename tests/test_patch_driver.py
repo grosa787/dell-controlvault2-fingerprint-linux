@@ -78,6 +78,7 @@ class PatchTests(unittest.TestCase):
     @unittest.skipUnless(STOCK, "set CV2_STOCK_DRIVER to the pinned stock library")
     def test_check_does_not_accept_legacy_five_patch_driver(self):
         patches = runpy.run_path(str(ROOT / "patch_driver.py"))["PATCHES"]
+        # Recreate v1.1.0: patches 1–3 are shared; the old patches 4–5 differ.
         data = Path(STOCK).read_bytes()
         for _, find, replacement in patches[:3]:
             data = data.replace(find, replacement)
@@ -90,7 +91,7 @@ class PatchTests(unittest.TestCase):
             source.write_bytes(data)
             result = self.run_check(source)
             self.assertEqual(result.returncode, 1, result.stderr)
-            self.assertIn("Partially patched or unknown", result.stdout)
+            self.assertIn("Known legacy CV2 driver", result.stdout)
 
     def test_invalid_input_preserves_output(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -139,25 +140,6 @@ class PatchTests(unittest.TestCase):
                         write_atomic(output, b"new driver")
                 self.assertEqual(output.read_bytes(), b"keep previous build")
                 self.assertEqual(list(Path(directory).iterdir()), [output])
-
-    def test_package_rejects_stale_cached_driver(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            for name in ("build_deb.sh", "patch_driver.py"):
-                shutil.copyfile(ROOT / name, root / name)
-            for name in ("prebuilt", "firmware", "udev"):
-                (root / name).mkdir()
-            (root / "prebuilt/libfprint-2-tod-1-broadcom.PATCHED.so").write_bytes(b"old driver")
-            (root / "firmware/dummy.bin").write_bytes(b"firmware")
-            (root / "udev/61-broadcom-cv2-5834.rules").write_text("# fixture\n")
-            output = root / "out.deb"
-            result = subprocess.run(
-                ["bash", str(root / "build_deb.sh"), str(output)],
-                capture_output=True, text=True,
-            )
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("checksum mismatch", result.stderr)
-            self.assertFalse(output.exists())
 
     def test_install_rejects_stale_driver_before_system_changes(self):
         with tempfile.TemporaryDirectory() as directory:

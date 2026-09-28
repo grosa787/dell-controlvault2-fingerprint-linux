@@ -19,8 +19,8 @@ vendor library's runtime dependencies (including TOD-enabled libfprint).
 The stock input must have SHA-256
 `54fa3befc02df393077cebf96e018e3bf752cee61509897d945ab18c58c5e172`.
 The integration tests require stock input. The patcher itself also accepts its
-exact patched output for idempotent re-patching; other modified inputs are rejected. The upstream
-library path is
+exact patched output for idempotent re-patching; other modified inputs are
+rejected. The upstream library path is
 `usr/lib/x86_64-linux-gnu/libfprint-2/tod-1/libfprint-2-tod-1-broadcom.so`.
 
 The C harnesses load a temporary patched library and intercept downstream calls;
@@ -29,12 +29,21 @@ are required. They exercise enrollment-update error handling, verify/identify re
 and delete authorization/status propagation. Other checks cover
 commit pointers and error branching, expected output checksum, unchanged output
 on invalid input, rejection of modified stock libraries, and rejection of stale
-libraries during packaging and direct installation. Atomic-write tests check
+libraries before installation. Atomic-write tests check
 replacement without modifying the previous inode, preservation of the existing
-output on write/replace failure, and temporary-file cleanup. Additional integration checks cover `--check` on stock and nine-patch builds,
-rejection of older five-patch and modified builds, and idempotent re-patching
-(including in place). The installer test uses the main branch's shared helpers and intercepts
-system commands and checks that invalid input is rejected before they run.
+output on write/replace failure, and temporary-file cleanup. Additional checks
+cover `--check` on stock and nine-patch builds, rejection of legacy builds for
+new installations, and idempotent re-patching (including in place). The invalid
+input installer test intercepts system commands and checks that invalid input
+is rejected before they run.
+
+`test_driver_lifecycle.py` exercises installation, upgrade, removal and stock
+backup restoration in temporary directories. System paths and device probes
+are redirected to fixtures; service, udev and dependency commands are stubbed.
+It checks that `--check --allow-legacy` recognizes the exact old five-patch build
+for removal and backup decisions, while stock, partial, unknown and modified
+builds remain protected from removal. Legacy builds remain invalid as the new
+installation source. No system driver or service is changed by these tests.
 
 The harness addresses and call conventions are specific to the pinned binary.
 Their success does not replace physical enrollment, negative matching checks,
@@ -58,3 +67,10 @@ These tests cover the pinned fetch revision, firmware replacement, and
 temporary-directory cleanup on success and on fetch, patch, or copy failures.
 Missing firmware retains the main branch's warning behavior. Git and the
 patcher use local fixtures; filesystem operations use the actual shell commands.
+
+## Hardware validation
+
+The contributor reports successful enrollment, authenticated deletion, and
+verification/login after a full reboot on a Latitude 7490. An unenrolled finger
+was also tested and rejected. These results apply to that tested unit; broader
+hardware coverage and multi-finger identify validation remain pending.

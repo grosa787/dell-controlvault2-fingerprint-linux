@@ -5,14 +5,16 @@ driver (libfprint-2-tod-1-broadcom.so) into one that drives the older
 ControlVault2 (Broadcom BCM5880, USB 0a5c:5834) sensor.
 
 Applies nine patches to the pinned Canonical binary. The commit arguments fix
-uses RIP-relative addresses, so only the pinned stock binary and the exact
-patched output are accepted by SHA-256.
+uses RIP-relative addresses, so patching accepts only the pinned stock binary
+or the exact patched output, verified by SHA-256.
 Commit attributes and authorization adapted from PR #8 by aegan977:
 https://github.com/grosa787/dell-controlvault2-fingerprint-linux/pull/8
 
 Usage:
     python3 patch_driver.py <input.so> <output.so>   apply the patches (idempotent)
     python3 patch_driver.py --check <driver.so>      report which patches are applied
+    python3 patch_driver.py --check --allow-legacy <driver.so>
+        also recognize the known five-patch build for removal / backup decisions
 
 Where <input.so> is the STOCK driver from Canonical's OEM repository at revision
 f7d31fcb9f6952d7d76ba50287e000c29760589d. Use build_from_upstream.sh to fetch that
@@ -28,6 +30,8 @@ import tempfile
 
 STOCK_SHA256 = "54fa3befc02df393077cebf96e018e3bf752cee61509897d945ab18c58c5e172"
 PATCHED_SHA256 = "62868df275e49a7a345ebd9245d651e141a750fee1bfa6d9a8b1b627b1678278"
+# v1.1.0's five patches applied to the pinned stock binary.
+LEGACY_PATCHED_SHA256 = "23e524729bec0c1bcac8861b2c1db77b1319607668a3fe23833e44bc54a5ac88"
 
 # (description, find_bytes, replace_bytes). Each `find` must occur exactly once.
 PATCHES = [
@@ -39,7 +43,8 @@ PATCHES = [
      bytes.fromhex("66f7c1fdff 740c".replace(" ", "")),
      bytes.fromhex("66f7c1fdff eb0c".replace(" ", ""))),
 
-    ("3. dev_probe: accept chip-type error 0x1c (resident firmware; no flashing)",
+    ("3. dev_probe: treat 'cannot determine chip type' (err 0x1c) as success "
+     "(CV2 has resident firmware; nothing is flashed)",
      bytes.fromhex("83f81c 741f"),
      bytes.fromhex("83f81c 743a")),
 
@@ -81,6 +86,7 @@ PATCHES = [
 def write_atomic(path, data):
     temporary = None
     try:
+        # Use the destination filesystem so os.replace remains atomic.
         with tempfile.NamedTemporaryFile(
             dir=os.path.dirname(os.path.abspath(path)), prefix=".patch-driver-", delete=False,
         ) as f:
@@ -107,11 +113,15 @@ def patch_state(data, find, repl):
     return "missing"
 
 
-def check(path):
+def check(path, allow_legacy=False):
     with open(path, "rb") as f:
         data = f.read()
     print("file:   " + path)
     print("sha256: " + sha256(data))
+    if sha256(data) == LEGACY_PATCHED_SHA256:
+        print("\nKnown legacy CV2 driver (five patches).")
+        print("Rebuild with ./build_from_upstream.sh before installing the current patches.")
+        return 0 if allow_legacy else 1
     states = [patch_state(data, find, repl) for _, find, repl in PATCHES]
     for (desc, _, _), state in zip(PATCHES, states):
         print("[%-7s] %s" % (state, desc.split(":")[0]))
@@ -129,6 +139,8 @@ def check(path):
 
 
 def main():
+    if len(sys.argv) == 4 and sys.argv[1:3] == ["--check", "--allow-legacy"]:
+        sys.exit(check(sys.argv[3], allow_legacy=True))
     if len(sys.argv) == 3 and sys.argv[1] == "--check":
         sys.exit(check(sys.argv[2]))
     if len(sys.argv) != 3:

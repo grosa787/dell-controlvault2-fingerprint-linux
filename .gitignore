@@ -8,4 +8,3 @@ firmware/bcm_cv_current_version.txt
 test_*.so
 *.tmp
 __pycache__/
-*.deb

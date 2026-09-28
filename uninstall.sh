@@ -12,8 +12,8 @@ if d="$(detect_tod_dir)"; then DIRS=("$d" "${DIRS[@]}"); fi
 for d in $(printf '%s\n' "${DIRS[@]}" | awk '!seen[$0]++'); do
   f="$d/$DRIVER_NAME"
   [[ -f "$f" ]] || continue
-  # Only remove our patched build; leave a stock driver from a distro package alone.
-  if python3 "$HERE/patch_driver.py" --check "$f" >/dev/null; then
+  # Recognize both current and legacy CV2 builds; leave stock/unknown drivers alone.
+  if python3 "$HERE/patch_driver.py" --check --allow-legacy "$f" >/dev/null; then
     log "Removing $f"
     $SUDO rm -f "$f"
   else

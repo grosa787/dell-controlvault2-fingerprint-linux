@@ -75,7 +75,8 @@ enabled (see README) and attach the output to an issue.
   definitions below; unknown errors must not be converted to success.
 - On the tested Latitude 7490, enrollment and authenticated deletion succeeded,
   with consistent fingerprint verification and successful login after a full
-  reboot. See [tests](tests/README.md) for regression checks.
+  reboot. The contributor also confirmed rejection of an unenrolled finger.
+  See [tests](tests/README.md) for regression checks.
 - The identify retry patch is covered by native callback tests; validation with
   multiple enrolled fingers through `fprintd` is still pending. Retry errors are
   reported before completion as required by the
@@ -98,6 +99,14 @@ from stock with `build_from_upstream.sh`. Input pinning
 is essential: the patches contain relative branches and RIP-relative addresses,
 which cannot safely be validated by matching the replaced instructions alone.
 The file size and ELF segment layout are unchanged.
+
+The earlier five-patch build from v1.1.0 has SHA-256
+`23e524729bec0c1bcac8861b2c1db77b1319607668a3fe23833e44bc54a5ac88` when applied
+to the pinned stock binary. `--check` identifies it as legacy and exits nonzero:
+it does not contain the current fixes. `--check --allow-legacy` also accepts
+that exact build for removal and backup decisions. This lets the uninstaller
+remove an older installation and keeps the installer from backing up a legacy
+patched driver as stock. Unknown or modified builds are not accepted for removal.
 
 ## Commit and deletion arguments
 

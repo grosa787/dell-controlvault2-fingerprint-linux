@@ -63,24 +63,6 @@ If an OS / `libfprint` update ever wipes it, run `./install.sh` again (re-run
 A stock `libfprint-2-tod-1-broadcom.so` from a distro package is backed up to
 `/var/lib/fprint/cv2-backup/` and restored by `./uninstall.sh`.
 
-### Optional local Debian / Ubuntu package
-
-As an alternative to `install.sh`, build a local package with `dpkg-deb`:
-
-```bash
-./build_deb.sh /tmp/broadcom-cv2.deb
-sudo apt install /tmp/broadcom-cv2.deb
-# To remove the package:
-sudo apt remove libfprint-2-tod1-broadcom-cv2
-```
-
-The package uses the Debian amd64 TOD directory and depends on `libfprint-2-tod1`.
-Its udev rule is package-owned under `/usr/lib/udev/rules.d`; manual installation
-continues to use `/etc/udev/rules.d`. Use one installation method at a time;
-run `./uninstall.sh` before switching from a manual installation to the package.
-The generated package contains proprietary driver/firmware files for local use;
-it is not committed to this repository.
-
 ---
 
 ## Status
@@ -91,7 +73,7 @@ it is not committed to this repository.
 | Open / power-on | ✅ works |
 | Fingerprint **capture** (sensor lights, grabs images) | ✅ works |
 | **Enroll** → `enroll-completed` | Confirmed on the tested Latitude 7490 with the updated patches; other units need validation |
-| **Verify / match** (match-on-chip) | Confirmed on that Latitude 7490, including login after a full reboot |
+| **Verify / match** (match-on-chip) | Confirmed on that Latitude 7490, including login after a full reboot; an unenrolled finger was rejected |
 | Authenticated template deletion | Confirmed on that Latitude 7490 |
 
 The hard part is **match-on-chip**: the template lives in the chip's secure
@@ -166,11 +148,14 @@ SHA-256 of input and output, and `python3 patch_driver.py --check <driver.so>`
 reports which patches an installed driver carries and verifies the completed
 build's checksum. To upgrade from the earlier five-patch driver, rerun
 `./build_from_upstream.sh` and install the new build.
+The known earlier five-patch build is identified as legacy by `--check`.
+Removal and backup checks also recognize that build, so `./uninstall.sh` can
+remove it and restore an existing stock backup. Installation still requires the
+current nine-patch build.
 
 ## Repo layout
 ```
 build_from_upstream.sh  fetch stock driver from Launchpad and patch it
-build_deb.sh            optional local Debian / Ubuntu package
 install.sh              install the patched driver + assets (multi-distro)
 uninstall.sh            remove it (restores a backed-up stock driver)
 diagnose.sh             read-only report for bug reports
