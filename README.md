@@ -72,12 +72,19 @@ A stock `libfprint-2-tod-1-broadcom.so` from a distro package is backed up to
 | Device detected by `libfprint`/`fprintd` | ✅ works (needs TOD-enabled libfprint) |
 | Open / power-on | ✅ works |
 | Fingerprint **capture** (sensor lights, grabs images) | ✅ works |
-| **Enroll** → `enroll-completed` | ⚠️ **unit-dependent** — the commit step fails on many units (see below) |
-| **Verify / match** (match-on-chip) | ⚠️ **unconfirmed** with patches 1–5 — reports say verify returns `no-match` for every finger |
+| **Enroll** → `enroll-completed` | Confirmed on the tested Latitude 7490 with the updated patches; other units need validation |
+| **Verify / match** (match-on-chip) | Confirmed on that Latitude 7490, including login after a full reboot; an unenrolled finger was rejected |
+| Authenticated template deletion | Confirmed on that Latitude 7490 |
 
 The hard part is **match-on-chip**: the template lives in the chip's secure
-storage. Patches **4–5** route some CV2 status codes, but CV2 firmwares differ
-and several units return codes these patches do not handle. Reports so far:
+storage. Updated patches **4–5** handle failed samples without accepting them
+as success; patches **6–8** supply CV2 storage and deletion arguments, and patch
+**9** adds identify retries. Identify retries are covered by native callback
+tests; multi-finger validation through `fprintd` is still pending.
+
+The reports below describe problems with the earlier patches 1–5. They remain
+useful for tracking other CV2 units; the Latitude 7490 result does not establish
+that these problems are resolved on every device:
 
 | Status at failure | Where | Reported on | Issue |
 |---|---|---|---|
@@ -87,10 +94,11 @@ and several units return codes these patches do not handle. Reports so far:
 | `0x100002` from `cv_open()` | session open | Latitude 7390 | #6 |
 | constant `0x17` from identify | verify | Latitude 7390 | #5 |
 
-These need new reverse-engineering work, not just a new constant — details and
-what is known about each code are in [PATCHES.md](PATCHES.md#known-cv2-status-codes--open-problems).
-A community fork reports enroll + verify working on a Latitude 7390 with
-additional patches (#12); those patches are not part of this repository.
+Details, the scope of the new fixes, and remaining open problems are in
+[PATCHES.md](PATCHES.md#known-cv2-status-codes--open-problems). The commit
+attributes and authorization changes are adapted from
+[aegan977's PR #8](https://github.com/grosa787/dell-controlvault2-fingerprint-linux/pull/8).
+A community fork also reports enroll + verify working on a Latitude 7390 (#12).
 
 > Tip while enrolling: **lift your finger completely between presses** and shift
 > its position a little each time. Failed grabs are ignored and harmless.
@@ -115,7 +123,8 @@ sudo journalctl -u fprintd --since "2 min ago" -o cat
 ```
 
 - `Device status = (NN)` (decimal) during enroll, or `identify failed 0xNN`
-  during verify → that `NN` is the CV status to map. See `PATCHES.md` #4/#5.
+  during verify → include that status in the diagnostic report. See `PATCHES.md`
+  for the known codes and how the patches handle them.
 - Re-list / clear prints: `fprintd-list "$USER"`, `fprintd-delete "$USER"`.
 - `No driver found for USB device 0A5C:5834` / *"No devices available"* →
   libfprint without TOD support, or the driver is in a directory libfprint
@@ -128,13 +137,21 @@ sudo journalctl -u fprintd --since "2 min ago" -o cat
 ---
 
 ## How it works
-Five byte-level patches turn the CV3 driver into a CV2 driver. Full
+Nine byte-level patches turn the CV3 driver into a CV2 driver. Full
 reverse-engineering write-up and the exact signatures are in
 **[PATCHES.md](PATCHES.md)**. The patcher (`patch_driver.py`) applies them by
-unique byte signature, so it survives minor upstream binary changes, and it
-reproduces the working driver **byte-for-byte**. It is idempotent, prints
+unique byte signature. The new commit/authorization patches also use relative
+addresses, so `build_from_upstream.sh` fetches the tested Canonical revision and
+the patcher verifies input and output SHA-256. It reproduces the working driver
+**byte-for-byte**. It is idempotent for the exact patched output, prints
 SHA-256 of input and output, and `python3 patch_driver.py --check <driver.so>`
-reports which patches an installed driver carries.
+reports which patches an installed driver carries and verifies the completed
+build's checksum. To upgrade from the earlier five-patch driver, rerun
+`./build_from_upstream.sh` and install the new build.
+The known earlier five-patch build is identified as legacy by `--check`.
+Removal and backup checks also recognize that build, so `./uninstall.sh` can
+remove it and restore an existing stock backup. Installation still requires the
+current nine-patch build.
 
 ## Repo layout
 ```
@@ -143,12 +160,13 @@ install.sh              install the patched driver + assets (multi-distro)
 uninstall.sh            remove it (restores a backed-up stock driver)
 diagnose.sh             read-only report for bug reports
 lib/common.sh           shared distro detection for the scripts above
-patch_driver.py         the 5 byte-patches (signature based) + --check
+patch_driver.py         the 9 byte-patches (signature based, pinned build) + --check
 prebuilt/               generated by build_from_upstream.sh (gitignored, proprietary)
 firmware/               generated by build_from_upstream.sh (gitignored, proprietary)
 udev/                   rule binding 0a5c:5834 to the driver
 PATCHES.md              reverse-engineering notes + known status codes
 CHANGELOG.md            release notes
+tests/                  regression tests and native callback harnesses
 ```
 
 ## Legal / license
