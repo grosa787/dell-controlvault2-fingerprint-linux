@@ -82,7 +82,7 @@ and several units return codes these patches do not handle. Reports so far:
 | Status at failure | Where | Reported on | Issue |
 |---|---|---|---|
 | `Device status = (36)` / `0x24` | commit | Precision 3520, Latitude 5290, 5491, 5590, 7390 | #1, #2, #3, #5, #7, #9 |
-| `Device status = (141)` / `0x8d` | commit (after a cancelled 4th capture) | Latitude 5290, 5490, 5590, 7390 | #2, #9, #12 |
+| `Device status = (141)` / `0x8d` | commit (after a cancelled 4th capture) | Latitude 5290, 5490, 5590, 7390, 7490 | #2, #9, #12, #15 |
 | `0x89` forever, stuck after 1st stage | enroll update | Latitude 7390 2-in-1 | #4 |
 | `0x100002` from `cv_open()` | session open | Latitude 7390 | #6 |
 | constant `0x17` from identify | verify | Latitude 7390 | #5 |
@@ -122,6 +122,17 @@ sudo journalctl -u fprintd --since "2 min ago" -o cat
   does not scan. Run `./diagnose.sh`.
 - *"Device disabled to prevent overheating"* after a failed enroll → libfprint's
   thermal model; `sudo systemctl restart fprintd` and retry.
+- `Update enrollment failed : cancel capture` followed by `Commit enrollment
+  failed (status=0x8d)` / `enroll-unknown-error` → one capture got no usable
+  image (about 6 s without a good touch) and the stock driver commits anyway.
+  Not a permanent fault on every unit (#12): restart fprintd, then press and
+  fully lift the finger at an even pace, without pausing between presses, and
+  retry. If it fails every time, attach `./diagnose.sh` output to your issue.
+- `Could not determine chip type` / `FwUpgradeError … Error: 0x1c` at start-up
+  is expected: patch 3 turns that stock firmware check into a no-op on CV2.
+  It is not the cause of an enroll failure.
+- `cv_fingerprint_identify failed 47` right before the first enroll stage is
+  fprintd's "is this finger already enrolled?" check; it is not fatal.
 - The `GTask … finalized without ever returning` warnings are harmless; they
   appear on working units too.
 
