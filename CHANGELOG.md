@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- Docs only; the binary patches (1–5) are unchanged. README and PATCHES.md now
+  record the `0x8d` commit failure on the Latitude 7490 (#15): what triggers it
+  (a cancelled capture followed by commit), a retry procedure, and which start-up
+  messages (`0x1c` chip type, `cv_fingerprint_identify failed 47`) are harmless.
+  The `0x8d` failure itself is still open.
+
 ## 1.1.0 — 2026-09-27
 
 Installer and diagnostics release. The binary patches (1–5) are unchanged.
