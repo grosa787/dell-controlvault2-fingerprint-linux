@@ -33,7 +33,7 @@ hard-wired to CV3.
 | 3 | `dev_probe` | firmware-check err `0x1c` handled as success (`je` disp `1f`→`3a`) | the CV3 driver can't match our BCM5880 to a "Citadel" chip type and aborts; CV2 already runs resident firmware, so **nothing is flashed** — we just skip the bogus upgrade check |
 | 4 | update wrapper, `0x2b164` | map `0x59` to the existing `0x89` sample-retry path, replacing only an error log | `0x59` is `CV_FP_MATCH_GENERAL_ERROR`, not data-ready; never commit the missing output token. Original `0xa4` rollback handling remains intact |
 | 5 | verify completion, `0xd510` | keep the command-status check; report `0x89` as a scan retry and other nonzero statuses as no match | stock error handling completed without `verify_report`; now report a retry error (`FPI_MATCH_ERROR`) or no match before `verify_complete(NULL)`. Match data is used only when command status is 0 |
-| 6 | commit wrapper, `0x2b251` | provide object attributes (8 bytes) and authorization (21 bytes) instead of zero arguments | CV2 rejects the empty attributes/authorization parameters in command `0x6e` |
+| 6 | commit wrapper, `0x2b251` | provide object attributes (8 bytes) and authorization (21 bytes) instead of zero arguments | older CV2 firmware rejects the empty arguments in command `0x6e` |
 | 7 | removed debug string, `0x358c0` | store the 29 bytes of attributes and authorization | read-only storage for patch 6 without extending ELF segments |
 | 8 | delete wrapper, `0x2b3c3` | supply 21-byte authorization list from commit | empty auth produced `CV_AUTH_FAIL` (8); authenticated deletion now returns success |
 | 9 | identify callback, `0xd39e` | report `0x89` as a scan retry, replacing status dispatch and a diagnostic log | use `identify_report(NULL, NULL, retry)` then `identify_complete(NULL)`; retain successful matches, no match for other errors, and session cleanup |
@@ -76,10 +76,11 @@ enabled (see README) and attach the output to an issue.
 - On the tested Latitude 7490, enrollment and authenticated deletion succeeded,
   with consistent fingerprint verification and successful login after a full
   reboot. The contributor also confirmed rejection of an unenrolled finger.
-  See [tests](tests/README.md) for regression checks.
-- The identify retry patch is covered by native callback tests; validation with
-  multiple enrolled fingers through `fprintd` is still pending. Retry errors are
-  reported before completion as required by the
+  The [binary regression tests](tests/test_patch_driver.py) check the output
+  hash, idempotence and rejection of changed input. They do not exercise
+  libfprint callbacks or a physical device.
+- The identify retry patch still needs validation with multiple enrolled
+  fingers through `fprintd`. Retry errors are reported before completion as required by the
   [libfprint API](https://fprint.freedesktop.org/libfprint-dev/libfprint-2-Internal-FpDevice.html#fpi-device-identify-report).
 - This is an **unofficial** patch of a **proprietary** binary. It is not endorsed
   by Dell, Broadcom or Canonical. Use on hardware you own.
