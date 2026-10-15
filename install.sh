@@ -47,7 +47,8 @@ DEST="$TOD_DIR/$DRIVER_NAME"
 $SUDO mkdir -p "$TOD_DIR" "$FW_DIR"
 # Keep a stock driver installed by a distro package (e.g. libfprint-2-tod1-broadcom)
 # so uninstall.sh can put it back.
-if [[ -f "$DEST" ]] && ! python3 "$HERE/patch_driver.py" --check "$DEST" >/dev/null; then
+# Exclude legacy CV2 builds too, so uninstall does not restore an older patched driver.
+if [[ -f "$DEST" ]] && ! python3 "$HERE/patch_driver.py" --check --allow-legacy "$DEST" >/dev/null; then
   if [[ ! -f "$BACKUP_DIR/$DRIVER_NAME" ]]; then
     log "Backing up existing $DEST -> $BACKUP_DIR/"
     $SUDO mkdir -p "$BACKUP_DIR"
